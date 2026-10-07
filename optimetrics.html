@@ -1111,6 +1111,7 @@
 
 /* ============ CONFIGURACIÓN ============ */
 const API_URL = 'https://script.google.com/macros/s/AKfycbx3-HPwoMOKq3pHf7czNUMKIfYZJ0Xq7WCzy8j_7GbWDK8pdubpOAdBIPKMjWRygyTJGQ/exec';
+const APP_VERSION = 'v5-' + new Date().toISOString().slice(0,10); // Se actualiza solo cada día
 
 /* ============ LOCAL STORAGE ============ */
 const LS = {
@@ -3087,8 +3088,35 @@ function clearLocal() {
   location.reload();
 }
 
+/* ============ AUTO-LIMPIEZA DE VERSIÓN ============ */
+function checkAppVersion() {
+  const savedVersion = LS.get('appVersion', '');
+  if (savedVersion !== APP_VERSION) {
+    console.log('🔄 Nueva versión detectada');
+    // Limpiar TODOS los datos viejos, excepto sesión y apiUrl
+    const sessionBackup = {
+      sessionUser: LS.get('sessionUser', null),
+      userData: LS.get('userData', null),
+      rememberMe: LS.get('rememberMe', false),
+      apiUrl: LS.get('apiUrl', null),
+      globalRange: LS.get('globalRange', 30)
+    };
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('opti_'))
+      .forEach(k => localStorage.removeItem(k));
+    // Restaurar
+    Object.entries(sessionBackup).forEach(([k, v]) => {
+      if (v !== null && v !== undefined) LS.set(k, v);
+    });
+    LS.set('appVersion', APP_VERSION);
+    console.log('✅ Cache limpiado, sesión preservada');
+  }
+}
+
+
 /* ============ BOOT ============ */
 async function boot() {
+  checkAppVersion();
   initRangeSelector();
 
   const rememberMe = LS.get('rememberMe', false);
