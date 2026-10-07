@@ -1195,36 +1195,66 @@ const round = (n,d=1) => Math.round(n * 10**d) / 10**d;
 const daysBetween = (a,b) => Math.round((new Date(b)-new Date(a))/86400000);
 
 /* ============ API JSONP ============ */
-function api(action, payload={}) {
+function api(action, payload={}, retries=2) {
   return new Promise((resolve, reject) => {
-    const callbackName = 'optiCB_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
-    let script;
-    window[callbackName] = (data) => {
-      try { delete window[callbackName]; } catch(e){}
-      if (script && script.parentNode) script.parentNode.removeChild(script);
-      if (data && data.error) reject(new Error(data.error));
-      else resolve(data);
-    };
-    const params = new URLSearchParams({
-      action: action,
-      callback: callbackName,
-      payload: JSON.stringify(payload)
-    });
-    script = document.createElement('script');
-    script.src = API_URL + (API_URL.indexOf('?') === -1 ? '?' : '&') + params.toString();
-    script.onerror = () => {
-      try { delete window[callbackName]; } catch(e){}
-      if (script && script.parentNode) script.parentNode.removeChild(script);
-      reject(new Error('Error de red (script no cargó)'));
-    };
-    document.body.appendChild(script);
-    setTimeout(() => {
-      if (window[callbackName]) {
+    const attempt = (n) => {
+      const callbackName = 'optiCB_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+      let script;
+      let settled = false;
+
+      const cleanup = () => {
         try { delete window[callbackName]; } catch(e){}
         if (script && script.parentNode) script.parentNode.removeChild(script);
-        reject(new Error('Timeout de red (15s)'));
-      }
-    }, 15000);
+      };
+
+      const timeoutId = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        // Reintentar si quedan intentos
+        if (n > 0) {
+          console.warn('Timeout, reintentando... (' + n + ')');
+          attempt(n - 1);
+        } else {
+          reject(new Error('Timeout de red (30s)'));
+        }
+      }, 30000);
+
+      window[callbackName] = (data) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        cleanup();
+        if (data && data.error) reject(new Error(data.error));
+        else resolve(data);
+      };
+
+      const params = new URLSearchParams({
+        action: action,
+        callback: callbackName,
+        payload: JSON.stringify(payload)
+      });
+
+      script = document.createElement('script');
+      script.src = API_URL + (API_URL.indexOf('?') === -1 ? '?' : '&') + params.toString();
+
+      script.onerror = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        cleanup();
+        if (n > 0) {
+          console.warn('Error de red, reintentando... (' + n + ')');
+          setTimeout(() => attempt(n - 1), 1000);
+        } else {
+          reject(new Error('Error de red (script no cargó)'));
+        }
+      };
+
+      document.body.appendChild(script);
+    };
+
+    attempt(retries);
   });
 }
 
@@ -3064,18 +3094,20 @@ async function boot() {
   const rememberMe = LS.get('rememberMe', false);
 
   if (state.usuario && state.userData && rememberMe && state.config.onboardingDone) {
+    // 1. Cargar de cache INSTANTÁNEO (aunque no haya internet)
     ['Peso','Comidas','Entrenos','Energia','Medidas'].forEach(k => {
       state.data[k] = LS.get('data_'+k, []);
     });
     applyUserConfig(state.userData);
     enterApp();
 
+    // 2. Sync en background (con más paciencia)
     setTimeout(async () => {
       try {
         const res = await api('loginAndFetch', {
           usuario: state.usuario,
           pin: state.userData.pin || ''
-        });
+        }, 3); // 3 reintentos
         if (res.ok) {
           state.userData = res.user;
           LS.set('userData', res.user);
@@ -3091,6 +3123,7 @@ async function boot() {
         }
       } catch(e) {
         console.warn('Sync falló (modo offline):', e);
+        toast('Modo offline. Se sincronizará cuando vuelva la conexión.', 'warn', 4000);
       }
     }, 100);
 
