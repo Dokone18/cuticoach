@@ -1,34 +1,33 @@
 /*******************************************************
- * CutiCoach - Service Worker
- * Cachea los archivos para que la app funcione offline
+ * CutiCoach - Service Worker v3 (sin CORS)
  *******************************************************/
 
-const CACHE_NAME = 'cuticoach-v1';
+const CACHE_NAME = 'cuticoach-v3';
 const ASSETS = [
   './',
   './optimetrics.html',
   './alimentos.js',
   './manifest.json',
-  './icon-192.svg',
-  './icon-512.svg',
-  'https://cdn.tailwindcss.com',
-  'https://cdn.jsdelivr.net/npm/chart.js',
-  'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap'
+  './icon-192.png',
+  './icon-512.png'
 ];
 
-/* Instalar: cachear todo */
+/* Instalar */
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
       return Promise.all(
-        ASSETS.map(url => cache.add(url).catch(() => null))
+        ASSETS.map(url => cache.add(url).catch(err => {
+          console.warn('No se pudo cachear:', url, err);
+          return null;
+        }))
       );
     })
   );
   self.skipWaiting();
 });
 
-/* Activar: limpiar versiones viejas */
+/* Activar */
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys().then(keys => Promise.all(
@@ -38,12 +37,19 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
-/* Fetch: cache primero, luego red */
+/* Fetch */
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
-  if (e.request.url.includes('script.google.com')) return;
-  if (e.request.url.includes('script.googleusercontent.com')) return;
-
+  
+  const url = e.request.url;
+  // No interceptar APIs externas (romperían CORS)
+  if (url.includes('script.google.com')) return;
+  if (url.includes('script.googleusercontent.com')) return;
+  if (url.includes('cdn.tailwindcss.com')) return;
+  if (url.includes('cdn.jsdelivr.net')) return;
+  if (url.includes('fonts.googleapis.com')) return;
+  if (url.includes('fonts.gstatic.com')) return;
+  
   e.respondWith(
     caches.match(e.request).then(cached => {
       const networkFetch = fetch(e.request).then(response => {
