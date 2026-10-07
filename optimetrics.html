@@ -3169,11 +3169,46 @@ async function boot() {
 boot();
 
 /* ============ REGISTRAR SERVICE WORKER (PWA) ============ */
+/* ============ REGISTRAR SERVICE WORKER (PWA auto-actualizable) ============ */
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./service-worker.js')
-      .then(reg => console.log('✅ PWA listo:', reg.scope))
+      .then(reg => {
+        console.log('✅ PWA listo:', reg.scope);
+        
+        // Buscar actualizaciones cada vez que carga
+        reg.update();
+        
+        // Detectar cuando hay nueva versión esperando
+        reg.addEventListener('updatefound', () => {
+          const newWorker = reg.installing;
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              console.log('🔄 Nueva versión disponible, actualizando...');
+              // Recargar automáticamente para usar la nueva versión
+              newWorker.postMessage({ action: 'skipWaiting' });
+            }
+          });
+        });
+      })
       .catch(err => console.warn('⚠️ Service Worker falló:', err));
+    
+    // Cuando el SW cambia, recargar la página
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!refreshing) {
+        refreshing = true;
+        console.log('🔄 Aplicando nueva versión...');
+        window.location.reload();
+      }
+    });
+    
+    // Buscar actualizaciones cada 1 hora
+    setInterval(() => {
+      navigator.serviceWorker.getRegistration().then(reg => {
+        if (reg) reg.update();
+      });
+    }, 60 * 60 * 1000);
   });
 }
 </script>
